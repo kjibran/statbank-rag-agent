@@ -11,7 +11,7 @@
 {"id": "q11", "type": "sampled", "question": "How many cash machines and payment terminals are there in Denmark?", "relevant": ["DNBSKK"]}
 {"id": "q12", "type": "sampled", "question": "How much freight is moved by train?", "relevant": ["BANE1"]}
 {"id": "q13", "type": "sampled", "question": "What are the total assets of Danish investment funds?", "relevant": ["DNIFUBAL"]}
-{"id": "q14", "type": "sampled", "question": "How much money do households have in their bank accounts?", "relevant": ["DNRUIPI"]}
+{"id": "q14", "type": "sampled", "question": "How much money do households have in their bank accounts?", "relevant": ["DNRUIPI", "DNPINDK"]}
 {"id": "q15", "type": "sampled", "question": "How much does the state budget for research and development?", "relevant": ["FOUBUD1"]}
 {"id": "q16", "type": "sampled", "question": "How many people left the Church of Denmark last year?", "relevant": ["KM2"]}
 {"id": "q17", "type": "sampled", "question": "How many couples got divorced last year?", "relevant": ["SKI6"]}
@@ -24,7 +24,7 @@
 {"id": "q24", "type": "sampled", "question": "How many elderly people received a preventive home visit from their municipality?", "relevant": ["AED10A"]}
 {"id": "q25", "type": "sampled", "question": "What is the average hourly wage in construction?", "relevant": ["LONS8020"]}
 {"id": "q26", "type": "sampled", "question": "How much timber was harvested from Danish forests?", "relevant": ["SKOV55A"]}
-{"id": "q27", "type": "sampled", "question": "How many people receive cash assistance from their municipality?", "relevant": ["KY045"]}
+{"id": "q27", "type": "sampled", "question": "How many people receive cash assistance from their municipality?", "relevant": ["KY045", "KY044"]}
 {"id": "q28", "type": "sampled", "question": "How many adults in each parish are members of the national church?", "relevant": ["KMSTA009"]}
 {"id": "q29", "type": "sampled", "question": "How many fibre internet connections are there in Denmark?", "relevant": ["DIS122"]}
 {"id": "q30", "type": "sampled", "question": "How many companies use social media for marketing?", "relevant": ["ITAV23"]}
@@ -34,7 +34,7 @@
 {"id": "q34", "type": "sampled", "question": "How many people can vote in the European Parliament election?", "relevant": ["EVSTEM2"]}
 {"id": "q35", "type": "sampled", "question": "What is the total balance sheet of Danish banks and mortgage institutions?", "relevant": ["DNBALA"]}
 {"id": "q36", "type": "sampled", "question": "How many new lorries and vans were registered this year?", "relevant": ["BIL5"]}
-{"id": "q37", "type": "sampled", "question": "How many children live with a single parent?", "relevant": ["FAM133N"]}
+{"id": "q37", "type": "sampled", "question": "How many children live with a single parent?", "relevant": ["FAM133N", "BRN12", "LIGEFI7"]}
 {"id": "q38", "type": "sampled", "question": "How much new lending do large banks give to companies?", "relevant": ["DNRUGPI"]}
 {"id": "q39", "type": "sampled", "question": "How many children have parents who were born abroad?", "relevant": ["KRYDS4"]}
 {"id": "q40", "type": "sampled", "question": "What is the education level of families in each region?", "relevant": ["INDKF107"]}
@@ -42,7 +42,7 @@
 {"id": "q42", "type": "time_range", "question": "What was the population of Denmark in 1950?", "relevant": ["BEFOLK2"]}
 {"id": "q43", "type": "time_range", "question": "How many people born in Poland lived in Denmark in 1995?", "relevant": ["BEF5"]}
 {"id": "q44", "type": "value_label", "question": "What is the business outlook for retailers?", "relevant": ["KBD03", "KBD01"]}
-{"id": "q45", "type": "value_label", "question": "How many people living in Denmark were born on 29 February?", "relevant": ["FOLK3"]}
+{"id": "q45", "type": "value_label", "question": "How many people living in Denmark were born on 29 February?", "relevant": ["FOLK3", "FOLK3FOD"]}
 {"id": "q46", "type": "value_label", "question": "How confident are construction companies about the business situation?", "relevant": ["KBB04"]}
 {"id": "q47", "type": "time_resolution", "question": "How has Copenhagen's population changed month by month over the last year?", "relevant": ["FOLK1AM"]}
 {"id": "q48", "type": "place_filter", "question": "How many unemployed people are there in Odense?", "relevant": ["AULP01"]}
