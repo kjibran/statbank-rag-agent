@@ -1,6 +1,8 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from psycopg.types.json import Jsonb
+
 from statbank_rag_agent.db import connect
 
 STATBANK_TZ = ZoneInfo("Europe/Copenhagen")
@@ -75,3 +77,23 @@ def upsert_tables(rows: list[dict]) -> int:
     with connect() as conn, conn.cursor() as cur:
         cur.executemany(UPSERT_TABLE, rows)
     return len(rows)
+
+
+def tables_needing_tableinfo() -> list[str]:
+    """Tables never fetched, or updated by Statistics Denmark since the last fetch."""
+    with connect() as conn:
+        rows = conn.execute(
+            "select table_id from statbank_tables "
+            "where tableinfo is null or tableinfo_fetched_at < source_updated "
+            "order by table_id"
+        ).fetchall()
+    return [r[0] for r in rows]
+
+
+def save_tableinfo(table_id: str, info: dict) -> None:
+    with connect() as conn:
+        conn.execute(
+            "update statbank_tables set tableinfo = %s, tableinfo_fetched_at = now() "
+            "where table_id = %s",
+            (Jsonb(info), table_id),
+        )
