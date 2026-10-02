@@ -6,13 +6,13 @@ from psycopg.types.json import Jsonb
 from statbank_rag_agent.db import connect
 
 STATBANK_TZ = ZoneInfo("Europe/Copenhagen")
+MAX_VALUES_PER_VARIABLE = 12
 
 
 def build_search_text(table: dict) -> str:
-    """One text per table combining title, variables, time range and unit.
+    """Basic search text from the table list: title, variables, time range and unit.
 
-    Many tables share the same title, so variables and time range are what
-    tell them apart in search.
+    Used only for newly added tables, until their full metadata has been fetched.
     """
     variables = ", ".join(table.get("variables") or [])
     return (
@@ -21,6 +21,30 @@ def build_search_text(table: dict) -> str:
         f"Covers {table.get('firstPeriod')} to {table.get('latestPeriod')}. "
         f"Unit: {table.get('unit')}."
     )
+
+
+def build_rich_search_text(
+    info: dict, first_period: str | None, latest_period: str | None
+) -> str:
+    """Search text from full metadata, including value labels for each variable.
+
+    Value labels carry words people search for (such as "retail" or "dentist")
+    and tell apart tables whose titles and variable names are identical.
+    """
+    parts = [
+        f"{info['text']}.",
+        f"Covers {first_period} to {latest_period}.",
+        f"Unit: {info.get('unit')}.",
+    ]
+    for variable in info.get("variables", []):
+        if variable.get("time"):
+            continue  # time is already covered by the period
+        labels = [value["text"] for value in variable.get("values", [])]
+        sample = ", ".join(labels[:MAX_VALUES_PER_VARIABLE])
+        more = len(labels) - MAX_VALUES_PER_VARIABLE
+        suffix = f" and {more} more" if more > 0 else ""
+        parts.append(f"{variable['text']}: {sample}{suffix}.")
+    return " ".join(parts)
 
 
 def _parse_updated(value: str | None) -> datetime | None:
@@ -43,6 +67,8 @@ def to_row(table: dict) -> dict:
     }
 
 
+# The basic search text is only written for new tables. Existing tables keep their
+# rich search text, which is maintained by rebuild_search_texts().
 UPSERT_TABLE = """
 insert into statbank_tables (
     table_id, title, unit, first_period, latest_period, variables, search_text, source_updated
@@ -57,14 +83,6 @@ on conflict (table_id) do update set
     first_period = excluded.first_period,
     latest_period = excluded.latest_period,
     variables = excluded.variables,
-    -- a changed search text makes the old embedding stale, so clear it
-    embedding = case
-        when statbank_tables.search_text = excluded.search_text then statbank_tables.embedding
-    end,
-    embedding_model = case
-        when statbank_tables.search_text = excluded.search_text then statbank_tables.embedding_model
-    end,
-    search_text = excluded.search_text,
     source_updated = excluded.source_updated,
     ingested_at = now()
 """
@@ -97,3 +115,30 @@ def save_tableinfo(table_id: str, info: dict) -> None:
             "where table_id = %s",
             (Jsonb(info), table_id),
         )
+
+
+def rebuild_search_texts() -> tuple[int, int]:
+    """Rebuild search texts from stored metadata. Clears embeddings only where the text changed.
+
+    Returns (tables checked, tables changed).
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "select table_id, tableinfo, first_period, latest_period, search_text "
+            "from statbank_tables where tableinfo is not null"
+        ).fetchall()
+
+        changed = []
+        for table_id, info, first_period, latest_period, old_text in rows:
+            new_text = build_rich_search_text(info, first_period, latest_period)
+            if new_text != old_text:
+                changed.append({"table_id": table_id, "search_text": new_text})
+
+        with conn.cursor() as cur:
+            cur.executemany(
+                "update statbank_tables "
+                "set search_text = %(search_text)s, embedding = null, embedding_model = null "
+                "where table_id = %(table_id)s",
+                changed,
+            )
+    return len(rows), len(changed)
