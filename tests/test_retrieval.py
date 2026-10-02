@@ -40,3 +40,12 @@ def test_filter_keeps_only_tables_covering_the_year():
 def test_filter_falls_back_when_nothing_covers_the_year():
     spans = {"A": (2008, 2026)}
     assert filter_by_years(["A"], [1850], spans) == ["A"]
+
+
+def test_covers_requires_every_year():
+    from statbank_rag_agent.retrieval import covers
+
+    assert covers((1901, 2026), [1950])
+    assert not covers((2008, 2026), [1950])
+    assert not covers((1990, 2000), [1995, 2010])
+    assert not covers(None, [1950])

@@ -18,6 +18,7 @@ from statbank_rag_agent.retrieval import (
     keyword_search,
     vector_search,
     with_year_filter,
+    with_year_prefilter,
 )
 
 EVAL_FILE = "eval/retrieval.jsonl"
@@ -26,12 +27,14 @@ METHODS = {
     "vector": vector_search,
     "keyword": keyword_search,
     "hybrid": hybrid_search,
-    "vector+years": with_year_filter(vector_search),
-    "hybrid+years": with_year_filter(hybrid_search),
+    "vector+postfilter": with_year_filter(vector_search),
+    "hybrid+postfilter": with_year_filter(hybrid_search),
+    "vector+prefilter": with_year_prefilter(vector_search),
+    "hybrid+prefilter": with_year_prefilter(hybrid_search),
 }
 
-# Usage: eval_retrieval.py                 compare all methods and log them to MLflow
-#        eval_retrieval.py hybrid misses   also list the misses of one method
+# Usage: eval_retrieval.py                          compare all methods and log them to MLflow
+#        eval_retrieval.py hybrid+prefilter misses  also list the misses of one method
 show_misses_for = sys.argv[1] if len(sys.argv) > 2 and sys.argv[2] == "misses" else None
 
 
@@ -47,18 +50,6 @@ def file_fingerprint(path: str) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:12]
 
 
-questions = load_questions(EVAL_FILE)
-types = sorted({q["type"] for q in questions})
-results = {name: evaluate(search, questions, k=10) for name, search in METHODS.items()}
-
-print(f"{len(questions)} questions")
-print(f"{'method':10} {'hit@1':>6} {'hit@5':>6} {'hit@10':>7} {'MRR':>6}")
-for name, r in results.items():
-    print(
-        f"{name:10} {r['hit@1']:6.2f} {r['hit@5']:6.2f} {r['hit@10']:7.2f} {r['mrr']:6.2f}"
-    )
-
-
 def hit5_by_type(result: dict) -> dict[str, float]:
     by_type = defaultdict(list)
     for p in result["per_question"]:
@@ -66,18 +57,29 @@ def hit5_by_type(result: dict) -> dict[str, float]:
     return {t: sum(h) / len(h) for t, h in by_type.items()}
 
 
+questions = load_questions(EVAL_FILE)
+types = sorted({q["type"] for q in questions})
+results = {name: evaluate(search, questions, k=10) for name, search in METHODS.items()}
+
+width = max(len(name) for name in METHODS)
+print(f"{len(questions)} questions")
+print(f"{'method':{width}} {'hit@1':>6} {'hit@5':>6} {'hit@10':>7} {'MRR':>6}")
+for name, r in results.items():
+    print(
+        f"{name:{width}} {r['hit@1']:6.2f} {r['hit@5']:6.2f} {r['hit@10']:7.2f} {r['mrr']:6.2f}"
+    )
+
 print("\nhit@5 by question type:")
-print(f"{'type':16} " + " ".join(f"{name:>8}" for name in METHODS))
 for qtype in types:
-    row = []
+    cells = []
     for name in METHODS:
         hits = [
             p["rank"] is not None and p["rank"] <= 5
             for p in results[name]["per_question"]
             if p["type"] == qtype
         ]
-        row.append(f"{sum(hits)}/{len(hits)}")
-    print(f"{qtype:16} " + " ".join(f"{cell:>8}" for cell in row))
+        cells.append(f"{name}={sum(hits)}/{len(hits)}")
+    print(f"  {qtype:16} " + "  ".join(cells))
 
 # Log one MLflow run per method
 mlflow.set_experiment(EXPERIMENT)
