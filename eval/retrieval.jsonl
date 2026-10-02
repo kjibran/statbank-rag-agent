@@ -39,7 +39,7 @@
 {"id": "q39", "type": "sampled", "question": "How many children have parents who were born abroad?", "relevant": ["KRYDS4"]}
 {"id": "q40", "type": "sampled", "question": "What is the education level of families in each region?", "relevant": ["INDKF107"]}
 {"id": "q41", "type": "place_filter", "question": "How many people live in Aarhus?", "relevant": ["FOLK1A", "FOLK1AM", "BEFOLK3"]}
-{"id": "q42", "type": "time_range", "question": "What was the population of Denmark in 1950?", "relevant": ["BEFOLK2"]}
+{"id": "q42", "type": "time_range", "question": "What was the population of Denmark in 1950?", "relevant": ["BEFOLK2", "FT", "VHNRB"]}
 {"id": "q43", "type": "time_range", "question": "How many people born in Poland lived in Denmark in 1995?", "relevant": ["BEF5"]}
 {"id": "q44", "type": "value_label", "question": "What is the business outlook for retailers?", "relevant": ["KBD03", "KBD01"]}
 {"id": "q45", "type": "value_label", "question": "How many people living in Denmark were born on 29 February?", "relevant": ["FOLK3", "FOLK3FOD"]}
