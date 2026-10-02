@@ -17,11 +17,18 @@ from statbank_rag_agent.retrieval import (
     hybrid_search,
     keyword_search,
     vector_search,
+    with_year_filter,
 )
 
 EVAL_FILE = "eval/retrieval.jsonl"
 EXPERIMENT = "table-retrieval"
-METHODS = {"vector": vector_search, "keyword": keyword_search, "hybrid": hybrid_search}
+METHODS = {
+    "vector": vector_search,
+    "keyword": keyword_search,
+    "hybrid": hybrid_search,
+    "vector+years": with_year_filter(vector_search),
+    "hybrid+years": with_year_filter(hybrid_search),
+}
 
 # Usage: eval_retrieval.py                 compare all methods and log them to MLflow
 #        eval_retrieval.py hybrid misses   also list the misses of one method
