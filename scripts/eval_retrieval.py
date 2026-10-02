@@ -1,33 +1,48 @@
-from collections import defaultdict
+import sys
 
 from statbank_rag_agent.db import connect
 from statbank_rag_agent.evaluation import evaluate, load_questions
-from statbank_rag_agent.retrieval import vector_search
+from statbank_rag_agent.retrieval import hybrid_search, keyword_search, vector_search
+
+METHODS = {"vector": vector_search, "keyword": keyword_search, "hybrid": hybrid_search}
+
+# Usage: eval_retrieval.py                 compare all methods
+#        eval_retrieval.py hybrid misses   also list the misses of one method
+show_misses_for = sys.argv[1] if len(sys.argv) > 2 and sys.argv[2] == "misses" else None
 
 questions = load_questions()
-result = evaluate(vector_search, questions, k=10)
+results = {name: evaluate(search, questions, k=10) for name, search in METHODS.items()}
 
-print(f"Vector search on {len(questions)} questions")
-print(f"  hit@1  {result['hit@1']:.2f}")
-print(f"  hit@5  {result['hit@5']:.2f}")
-print(f"  hit@10 {result['hit@10']:.2f}")
-print(f"  MRR    {result['mrr']:.2f}")
+print(f"{len(questions)} questions")
+print(f"{'method':10} {'hit@1':>6} {'hit@5':>6} {'hit@10':>7} {'MRR':>6}")
+for name, r in results.items():
+    print(
+        f"{name:10} {r['hit@1']:6.2f} {r['hit@5']:6.2f} {r['hit@10']:7.2f} {r['mrr']:6.2f}"
+    )
 
-by_type = defaultdict(list)
-for p in result["per_question"]:
-    by_type[p["type"]].append(p["rank"] is not None and p["rank"] <= 5)
 print("\nhit@5 by question type:")
-for qtype, hits in sorted(by_type.items()):
-    print(f"  {qtype:16} {sum(hits)}/{len(hits)}")
+types = sorted({q["type"] for q in questions})
+print(f"{'type':16} " + " ".join(f"{name:>8}" for name in METHODS))
+for qtype in types:
+    row = []
+    for name in METHODS:
+        hits = [
+            p["rank"] is not None and p["rank"] <= 5
+            for p in results[name]["per_question"]
+            if p["type"] == qtype
+        ]
+        row.append(f"{sum(hits)}/{len(hits)}")
+    print(f"{qtype:16} " + " ".join(f"{cell:>8}" for cell in row))
 
-with connect(read_only=True) as conn:
-    titles = dict(conn.execute("select table_id, title from statbank_tables").fetchall())
-
-print("\nMisses (correct table not in the top 5):")
-for p in result["per_question"]:
-    if p["rank"] is None or p["rank"] > 5:
-        found = f"rank {p['rank']}" if p["rank"] else "not in top 10"
-        print(f"\n{p['id']} ({found}) {p['question']}")
-        print(f"  expected: {', '.join(f'{t} {titles.get(t, "?")}' for t in p['relevant'])}")
-        for table_id in p["results"][:3]:
-            print(f"  got:      {table_id} {titles.get(table_id, '?')}")
+if show_misses_for:
+    with connect(read_only=True) as conn:
+        titles = dict(
+            conn.execute("select table_id, title from statbank_tables").fetchall()
+        )
+    print(f"\nMisses for {show_misses_for} (correct table not in the top 5):")
+    for p in results[show_misses_for]["per_question"]:
+        if p["rank"] is None or p["rank"] > 5:
+            found = f"rank {p['rank']}" if p["rank"] else "not in top 10"
+            print(f"\n{p['id']} ({found}) {p['question']}")
+            for table_id in p["results"][:3]:
+                print(f"  got: {table_id} {titles.get(table_id, '?')}")

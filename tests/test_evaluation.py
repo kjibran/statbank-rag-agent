@@ -6,9 +6,9 @@ QUESTIONS = [
     {"id": "c", "type": "t", "question": "third", "relevant": ["Z"]},
 ]
 FAKE_RESULTS = {
-    "first": ["X", "A", "B"],   # correct at rank 1
+    "first": ["X", "A", "B"],  # correct at rank 1
     "second": ["A", "Y", "B"],  # correct at rank 2
-    "third": ["A", "B", "C"],   # not found
+    "third": ["A", "B", "C"],  # not found
 }
 
 

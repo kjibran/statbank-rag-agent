@@ -23,7 +23,13 @@ def evaluate(search: SearchFunction, questions: list[dict], k: int = 10) -> dict
     per_question = []
     for q in questions:
         results = search(q["question"], k)
-        per_question.append({**q, "results": results, "rank": first_relevant_rank(results, q["relevant"])})
+        per_question.append(
+            {
+                **q,
+                "results": results,
+                "rank": first_relevant_rank(results, q["relevant"]),
+            }
+        )
 
     n = len(per_question)
     ranks = [p["rank"] for p in per_question]
