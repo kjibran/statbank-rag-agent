@@ -13,7 +13,7 @@ for i, step in enumerate(result.steps, start=1):
         f"{i}. {step.tool}({json.dumps(step.arguments, ensure_ascii=False)}) -> {status} [{step.provider}]"
     )
 
-notes = [f"{len(result.providers)} model calls"]
+notes = [f"{len(result.providers)} model calls", f"{result.tokens:,} tokens"]
 if result.restarts:
     notes.append(f"restarted {result.restarts}x with another provider")
 if result.hit_step_limit:

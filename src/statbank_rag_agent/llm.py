@@ -1,5 +1,5 @@
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -20,6 +20,7 @@ class Provider:
     base_url: str
     api_key: str
     model: str
+    extra: dict = field(default_factory=dict)  # provider-specific request options
 
 
 def providers() -> list[Provider]:
@@ -30,6 +31,9 @@ def providers() -> list[Provider]:
             "https://api.groq.com/openai/v1",
             settings.groq_api_key,
             settings.groq_model,
+            # gpt-oss models reason before answering, and reasoning tokens count against
+            # the free per-minute budget. Low effort is enough for choosing tools.
+            extra={"reasoning_effort": "low"},
         ),
         Provider(
             "gemini",
@@ -52,9 +56,19 @@ def _retry_after(response: httpx.Response) -> float:
         return DEFAULT_RETRY_SECONDS
 
 
-def _call(provider: Provider, messages: list[dict], tools: list[dict] | None) -> dict:
-    """One request to one provider. Rate limits and network errors are retried after a pause."""
-    payload: dict = {"model": provider.model, "messages": messages, "temperature": 0}
+def _call(
+    provider: Provider, messages: list[dict], tools: list[dict] | None
+) -> tuple[dict, int]:
+    """One request to one provider. Returns the message and the tokens used.
+
+    Rate limits and network errors are retried after a pause.
+    """
+    payload: dict = {
+        "model": provider.model,
+        "messages": messages,
+        "temperature": 0,
+        **provider.extra,
+    }
     if tools:
         payload["tools"] = tools
     problem = ""
@@ -80,7 +94,9 @@ def _call(provider: Provider, messages: list[dict], tools: list[dict] | None) ->
             raise LLMError(
                 f"{provider.name}: HTTP {response.status_code}: {response.text[:200]}"
             )
-        return response.json()["choices"][0]["message"]
+        data = response.json()
+        tokens = (data.get("usage") or {}).get("total_tokens", 0)
+        return data["choices"][0]["message"], tokens
     raise LLMError(f"{problem} (gave up after {RATE_LIMIT_ATTEMPTS} attempts)")
 
 
@@ -88,10 +104,10 @@ def chat(
     messages: list[dict],
     tools: list[dict] | None = None,
     provider: Provider | None = None,
-) -> tuple[dict, str]:
+) -> tuple[dict, str, int]:
     """Send a chat request. With `provider`, only that provider is used. Otherwise fall back in order.
 
-    Returns the model's message (text, or a request to call tools) and the provider that answered.
+    Returns the model's message, the provider that answered, and the tokens used.
     """
     candidates = [provider] if provider else providers()
     if not candidates:
@@ -99,7 +115,8 @@ def chat(
     errors = []
     for candidate in candidates:
         try:
-            return _call(candidate, messages, tools), candidate.name
+            message, tokens = _call(candidate, messages, tools)
+            return message, candidate.name, tokens
         except LLMError as exc:
             errors.append(str(exc))
     raise LLMError("All providers failed. " + " | ".join(errors))

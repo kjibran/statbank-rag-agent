@@ -8,7 +8,7 @@ from statbank_rag_agent import llm
 from statbank_rag_agent.tools import TOOL_SCHEMAS, run_tool
 
 MAX_STEPS = 8
-MAX_TOOL_RESULT_CHARS = 6000  # keeps long tool results from filling the model's context
+MAX_TOOL_RESULT_CHARS = 3000  # keeps long tool results from filling the model's context
 LOCAL_TZ = ZoneInfo(
     "Europe/Copenhagen"
 )  # the users' and Statistics Denmark's time zone
@@ -49,6 +49,7 @@ class AgentResult:
     providers: list[str] = field(default_factory=list)
     hit_step_limit: bool = False
     restarts: int = 0  # how often the question was restarted with another provider
+    tokens: int = 0  # total tokens used across all model calls
     seconds: float = 0.0
 
     @property
@@ -84,8 +85,9 @@ def _run_with(provider: llm.Provider, question: str, max_steps: int) -> AgentRes
     ]
 
     for _ in range(max_steps):
-        message, name = llm.chat(messages, TOOL_SCHEMAS, provider=provider)
+        message, name, tokens = llm.chat(messages, TOOL_SCHEMAS, provider=provider)
         result.providers.append(name)
+        result.tokens += tokens
         messages.append(llm.clean_assistant_message(message))
 
         tool_calls = message.get("tool_calls") or []
@@ -119,8 +121,9 @@ def _run_with(provider: llm.Provider, question: str, max_steps: int) -> AgentRes
             "fetched, or say that you could not find it.",
         }
     )
-    message, name = llm.chat(messages, provider=provider)
+    message, name, tokens = llm.chat(messages, provider=provider)
     result.providers.append(name)
+    result.tokens += tokens
     result.answer = (message.get("content") or "").strip()
     return result
 

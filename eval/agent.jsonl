@@ -1,0 +1,18 @@
+{"id": "a01", "question": "How many people lived in Aarhus municipality on 1 January 2020?", "truth": {"table": "FOLK1A", "select": {"region": ["Aarhus"], "time": ["2020Q1"]}}}
+{"id": "a02", "question": "What was the population of Copenhagen municipality at the start of 2015?", "truth": {"table": "FOLK1A", "select": {"region": ["Copenhagen"], "time": ["2015Q1"]}}}
+{"id": "a03", "question": "How many women lived in Denmark on 1 January 2024?", "truth": {"table": "FOLK1A", "select": {"region": ["All Denmark"], "sex": ["Women"], "time": ["2024Q1"]}}}
+{"id": "a04", "question": "How many men lived in Odense on 1 July 2022?", "truth": {"table": "FOLK1A", "select": {"region": ["Odense"], "sex": ["Men"], "time": ["2022Q3"]}}}
+{"id": "a05", "question": "How many 100-year-olds lived in Denmark on 1 January 2025?", "truth": {"table": "FOLK1A", "select": {"region": ["All Denmark"], "age": ["100 years"], "time": ["2025Q1"]}}}
+{"id": "a06", "question": "What was the population of Denmark on 1 January 1950?", "truth": {"table": "BEFOLK2", "select": {"time": ["1950"]}}}
+{"id": "a07", "question": "How many people lived in Denmark in 1901?", "truth": {"table": "BEFOLK2", "select": {"time": ["1901"]}}}
+{"id": "a08", "question": "How many men lived in Denmark on 1 January 1980?", "truth": {"table": "BEFOLK2", "select": {"sex": ["Men"], "time": ["1980"]}}}
+{"id": "a09", "question": "How many people born in Poland lived in Denmark on 1 January 1995?", "truth": {"table": "BEF5", "select": {"country of birth": ["Poland"], "time": ["1995"]}}}
+{"id": "a10", "question": "How many people born in Germany lived in Denmark on 1 January 2010?", "truth": {"table": "BEF5", "select": {"country of birth": ["Germany"], "time": ["2010"]}}}
+{"id": "a11", "question": "How many people lived in Copenhagen on 1 March 2025?", "truth": {"table": "FOLK1AM", "select": {"region": ["Copenhagen"], "time": ["2025M03"]}}}
+{"id": "a12", "question": "How many divorces were there in Denmark in 2020?", "truth": {"table": "SKI6", "select": {"time": ["2020"]}}}
+{"id": "a13", "question": "How many people living in Denmark on 1 January 2024 were born on 29 February?", "truth": {"table": "FOLK3", "select": {"day of birth": ["29."], "birth month": ["February"], "time": ["2024"]}}}
+{"id": "a14", "question": "How many women lived in Aarhus municipality on 1 January 2018?", "truth": {"table": "FOLK1A", "select": {"region": ["Aarhus"], "sex": ["Women"], "time": ["2018Q1"]}}}
+{"id": "a15", "question": "How many people lived in Region Hovedstaden on 1 January 2021?", "truth": {"table": "FOLK1A", "select": {"region": ["Region Hovedstaden"], "time": ["2021Q1"]}}}
+{"id": "u01", "question": "How many cats live in Copenhagen?", "answerable": false}
+{"id": "u02", "question": "What was the unemployment rate in Denmark in 1850?", "answerable": false}
+{"id": "u03", "question": "How many people in Aarhus prefer coffee to tea?", "answerable": false}

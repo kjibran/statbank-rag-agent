@@ -40,7 +40,7 @@ def test_agent_runs_tools_then_answers(monkeypatch, one_provider):
     monkeypatch.setattr(
         agent.llm,
         "chat",
-        lambda messages, tools=None, provider=None: (next(replies), provider.name),
+        lambda messages, tools=None, provider=None: (next(replies), provider.name, 100),
     )
 
     result = agent.run_agent("How many?")
@@ -48,14 +48,15 @@ def test_agent_runs_tools_then_answers(monkeypatch, one_provider):
     assert [s.tool for s in result.steps] == ["describe_table"]
     assert result.steps[0].arguments == {"table_id": "FOLK1A"}
     assert result.providers == ["a", "a"]
+    assert result.tokens == 200  # two model calls of 100 tokens each
     assert result.restarts == 0
 
 
 def test_step_limit_forces_a_final_answer(monkeypatch, one_provider):
     def fake_chat(messages, tools=None, provider=None):
         if tools is None:  # the final call without tools
-            return answer("I could not find it."), provider.name
-        return tool_call("c", "search_tables", '{"query": "x"}'), provider.name
+            return answer("I could not find it."), provider.name, 10
+        return tool_call("c", "search_tables", '{"query": "x"}'), provider.name, 10
 
     monkeypatch.setattr(agent.llm, "chat", fake_chat)
     result = agent.run_agent("Impossible question", max_steps=3)
@@ -74,10 +75,10 @@ def test_question_restarts_with_next_provider_instead_of_switching_midway(monkey
             calls["a"] += 1
             if calls["a"] == 2:  # provider a fails in the middle of the conversation
                 raise llm.LLMError("a: rate limited")
-            return tool_call("c", "search_tables", '{"query": "x"}'), "a"
+            return tool_call("c", "search_tables", '{"query": "x"}'), "a", 10
         if len(messages) == 2:  # b starts from scratch: only system prompt and question
-            return tool_call("c", "search_tables", '{"query": "x"}'), "b"
-        return answer("Done."), "b"
+            return tool_call("c", "search_tables", '{"query": "x"}'), "b", 10
+        return answer("Done."), "b", 10
 
     monkeypatch.setattr(agent.llm, "chat", fake_chat)
     result = agent.run_agent("q")

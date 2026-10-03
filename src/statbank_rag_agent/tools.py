@@ -8,7 +8,7 @@ from statbank_rag_agent.retrieval import hybrid_search, with_year_prefilter
 from statbank_rag_agent.statbank import fetch_data
 
 SEARCH_RESULTS = 8
-EXAMPLE_VALUES = 5
+EXAMPLE_VALUES = 4
 MAX_MATCHES = 10
 MAX_CELLS = 200
 TOTAL_CODES = {"TOT", "IALT", "000"}
@@ -63,6 +63,12 @@ def _value_entry(value: dict) -> dict:
     return entry
 
 
+def _compact(entry: dict) -> str:
+    """'751=Aarhus', or '000=All Denmark (total)'. Much shorter than JSON objects."""
+    suffix = " (total)" if entry.get("is_total") else ""
+    return f"{entry['code']}={entry['label']}{suffix}"
+
+
 def check_selections(info: dict, selections: dict[str, list[str]]) -> str | None:
     """Return a problem description, or None if the selection can be fetched."""
     by_id = {v["id"].lower(): v for v in info["variables"]}
@@ -114,7 +120,7 @@ def _unknown_table(table_id: str) -> dict:
 
 
 def search_tables(query: str) -> dict:
-    """Candidate tables for a topic."""
+    """Candidate tables for a topic, one line each: id | title | period | variables."""
     table_ids = _search(query, SEARCH_RESULTS)
     if not table_ids:
         return {"tables": [], "note": "No tables found. Try different words."}
@@ -127,12 +133,7 @@ def search_tables(query: str) -> dict:
     by_id = {r[0]: r for r in rows}
     return {
         "tables": [
-            {
-                "table_id": t,
-                "title": by_id[t][1],
-                "period": f"{by_id[t][2]} to {by_id[t][3]}",
-                "variables": by_id[t][4],
-            }
+            f"{t} | {by_id[t][1]} | {by_id[t][2]} to {by_id[t][3]} | {', '.join(by_id[t][4])}"
             for t in table_ids
             if t in by_id
         ]
@@ -140,36 +141,36 @@ def search_tables(query: str) -> dict:
 
 
 def describe_table(table_id: str) -> dict:
-    """A table's variables, with example values, and the rules for selecting them."""
+    """A table's variables, example codes, time periods and selection rules, one line per variable."""
     info = _tableinfo(table_id)
     if info is None:
         return _unknown_table(table_id)
     variables = []
     for variable in info["variables"]:
         values = variable.get("values", [])
-        entry = {
-            "id": variable["id"],
-            "label": variable["text"],
-            "number_of_values": len(values),
-            "can_be_left_out": variable.get("elimination", False),
-        }
+        head = f"{variable['id']} ({variable['text']})"
         if variable.get("time"):
-            entry["is_time"] = True
-            entry["earliest_period"] = values[0]["id"] if values else None
-            entry["latest_periods"] = [v["id"] for v in values[-EXAMPLE_VALUES:]]
+            latest = ", ".join(v["id"] for v in values[-EXAMPLE_VALUES:])
+            first = values[0]["id"] if values else "?"
+            variables.append(
+                f"{head}: must be selected. Time codes {first} to {values[-1]['id']}. Latest: {latest}"
+            )
         else:
-            entry["examples"] = [_value_entry(v) for v in values[:EXAMPLE_VALUES]]
-        variables.append(entry)
+            rule = (
+                "can be left out (summed)"
+                if variable.get("elimination", False)
+                else "must be selected"
+            )
+            examples = ", ".join(
+                _compact(_value_entry(v)) for v in values[:EXAMPLE_VALUES]
+            )
+            variables.append(
+                f"{head}: {len(values)} values, {rule}. Examples: {examples}"
+            )
     return {
-        "table_id": info.get("id", table_id.upper()),
-        "title": info.get("text"),
-        "unit": info.get("unit"),
+        "table": f"{info.get('id', table_id.upper())} | {info.get('text')} | unit: {info.get('unit')}",
         "variables": variables,
-        "rules": (
-            "Variables that can be left out are summed over when not selected. "
-            "The time variable must always be selected. "
-            "Never add a total value to its own parts."
-        ),
+        "rules": "Never add a total value to its own parts. Use find_values for codes not shown.",
     }
 
 
@@ -193,7 +194,7 @@ def find_values(table_id: str, variable_id: str, text: str) -> dict:
             "matches": [],
             "note": "No match. Try another spelling.",
         }
-    return {"variable": variable["id"], "matches": matches}
+    return {"variable": variable["id"], "matches": [_compact(m) for m in matches]}
 
 
 def get_data(table_id: str, selections: dict[str, list[str]]) -> dict:
@@ -230,17 +231,13 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_tables",
-            "description": "Find Statistics Denmark tables about a topic. Returns candidates with title, period and variables.",
+            "description": "Find tables about a topic. Returns lines: id | title | period | variables.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": (
-                            "The topic, for example 'population by municipality'. Leave out place names "
-                            "and specific values, find those later with find_values. Include a year only "
-                            "if the question is about a specific year."
-                        ),
+                        "description": "A short topic, such as 'population'. No place names. Add a year only if asked about one.",
                     }
                 },
                 "required": ["query"],
@@ -251,12 +248,10 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "describe_table",
-            "description": "Show a table's variables, example values, time periods and selection rules.",
+            "description": "Show a table's variables, example codes and time codes.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "table_id": {"type": "string", "description": "For example FOLK1A."}
-                },
+                "properties": {"table_id": {"type": "string"}},
                 "required": ["table_id"],
             },
         },
@@ -265,19 +260,16 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "find_values",
-            "description": "Look up the codes for values in one variable, for example a municipality name.",
+            "description": "Look up codes in one variable, such as a municipality name. Returns code=label.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "table_id": {"type": "string"},
                     "variable_id": {
                         "type": "string",
-                        "description": "Variable id from describe_table, for example OMRÅDE.",
+                        "description": "Variable id, such as OMRÅDE.",
                     },
-                    "text": {
-                        "type": "string",
-                        "description": "What to look for, for example Aarhus.",
-                    },
+                    "text": {"type": "string"},
                 },
                 "required": ["table_id", "variable_id", "text"],
             },
@@ -287,14 +279,14 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_data",
-            "description": "Fetch numbers. Select codes per variable. Variables left out are summed over.",
+            "description": "Fetch numbers. Map variable ids to lists of codes. Unselected variables are summed.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "table_id": {"type": "string"},
                     "selections": {
                         "type": "object",
-                        "description": 'Variable id to list of codes, for example {"OMRÅDE": ["751"], "Tid": ["2026K3"]}.',
+                        "description": 'For example {"OMRÅDE": ["751"], "Tid": ["2026K3"]}.',
                         "additionalProperties": {
                             "type": "array",
                             "items": {"type": "string"},
