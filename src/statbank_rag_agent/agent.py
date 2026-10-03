@@ -27,11 +27,21 @@ Rules:
 - Variables you leave out are summed over. Never add a total (such as "All Denmark" or "Total") to its own parts.
 - Check that the data covers what was asked. A table broken down by islands, parishes or other groups may not cover all of Denmark. For national figures, use a table with a total such as "All Denmark", or one without a geographic breakdown.
 - If the question does not name a period, use the latest available period and say which one it is.
-- If no table fits the question, say so plainly instead of guessing.
+- Before saying that no table fits, search at least twice with different words. For a specific date, also try "monthly" or "quarterly".
+- If no table fits after that, say so plainly instead of guessing.
 - Keep the answer short: the number with its unit and period, and one sentence of context if useful.
 - End with the source line from get_data, for example "Source: Statistics Denmark, StatBank.dk/folk1a".
   If you combined or calculated values yourself, write "Source: Own calculations based on data from Statistics Denmark, StatBank.dk/<table>".
 """
+
+FINAL_ANSWER_PROMPT = """You reached the step limit while answering this question:
+{question}
+
+These are the tool calls you made and what they returned:
+{transcript}
+
+Answer now using only these results. If they do not contain the answer, say that you could not find it.
+End with the source line, as described in your instructions."""
 
 
 @dataclass
@@ -77,13 +87,45 @@ def _today() -> str:
     return datetime.now(LOCAL_TZ).date().isoformat()
 
 
+def _system_message() -> dict:
+    return {"role": "system", "content": SYSTEM_PROMPT.format(today=_today())}
+
+
+def _transcript(steps: list[Step]) -> str:
+    """The tool calls as plain text, for a final answer without any tool context."""
+    lines = []
+    for i, step in enumerate(steps, start=1):
+        arguments = json.dumps(step.arguments, ensure_ascii=False)
+        result = json.dumps(step.result, ensure_ascii=False)[:MAX_TOOL_RESULT_CHARS]
+        lines.append(f"{i}. {step.tool}({arguments}) returned: {result}")
+    return "\n".join(lines)
+
+
+def _final_answer(provider: llm.Provider, question: str, result: AgentResult) -> None:
+    """Force a text answer at the step limit.
+
+    The conversation is rebuilt as plain text without tool calls. Some models keep trying
+    to call tools when they see earlier tool calls, even when no tools are offered.
+    """
+    messages = [
+        _system_message(),
+        {
+            "role": "user",
+            "content": FINAL_ANSWER_PROMPT.format(
+                question=question, transcript=_transcript(result.steps)
+            ),
+        },
+    ]
+    message, name, tokens = llm.chat(messages, provider=provider)
+    result.providers.append(name)
+    result.tokens += tokens
+    result.answer = (message.get("content") or "").strip()
+
+
 def _run_with(provider: llm.Provider, question: str, max_steps: int) -> AgentResult:
     """The whole conversation with one provider. Tool-calling conversations cannot switch midway."""
     result = AgentResult(question=question)
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT.format(today=_today())},
-        {"role": "user", "content": question},
-    ]
+    messages = [_system_message(), {"role": "user", "content": question}]
 
     for _ in range(max_steps):
         message, name, tokens = llm.chat(messages, TOOL_SCHEMAS, provider=provider)
@@ -113,19 +155,8 @@ def _run_with(provider: llm.Provider, question: str, max_steps: int) -> AgentRes
                 }
             )
 
-    # Step limit reached: one last call without tools forces a text answer
     result.hit_step_limit = True
-    messages.append(
-        {
-            "role": "user",
-            "content": "You have reached the step limit. Answer now using only data you already "
-            "fetched, or say that you could not find it.",
-        }
-    )
-    message, name, tokens = llm.chat(messages, provider=provider)
-    result.providers.append(name)
-    result.tokens += tokens
-    result.answer = (message.get("content") or "").strip()
+    _final_answer(provider, question, result)
     return result
 
 

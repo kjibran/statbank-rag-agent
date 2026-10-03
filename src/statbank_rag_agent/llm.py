@@ -5,7 +5,8 @@ import httpx
 
 from statbank_rag_agent.config import settings
 
-RATE_LIMIT_ATTEMPTS = 3
+ATTEMPTS = 3
+RETRY_STATUSES = {429, 500, 502, 503, 504}  # rate limits and temporary overloads
 DEFAULT_RETRY_SECONDS = 20.0
 MAX_RETRY_SECONDS = 60.0
 
@@ -45,15 +46,15 @@ def providers() -> list[Provider]:
     return [p for p in candidates if p.api_key and p.model]
 
 
-def _retry_after(response: httpx.Response) -> float:
-    """How long the provider asks us to wait, capped at a minute."""
+def _wait_seconds(response: httpx.Response, attempt: int) -> float:
+    """Use the provider's retry-after header if given, otherwise wait longer after each attempt."""
     header = response.headers.get("retry-after")
     try:
-        return (
-            min(float(header), MAX_RETRY_SECONDS) if header else DEFAULT_RETRY_SECONDS
-        )
+        if header:
+            return min(float(header), MAX_RETRY_SECONDS)
     except ValueError:
-        return DEFAULT_RETRY_SECONDS
+        pass
+    return min(DEFAULT_RETRY_SECONDS * (attempt + 1), MAX_RETRY_SECONDS)
 
 
 def _call(
@@ -61,7 +62,7 @@ def _call(
 ) -> tuple[dict, int]:
     """One request to one provider. Returns the message and the tokens used.
 
-    Rate limits and network errors are retried after a pause.
+    Rate limits, temporary overloads and network errors are retried after a pause.
     """
     payload: dict = {
         "model": provider.model,
@@ -72,7 +73,7 @@ def _call(
     if tools:
         payload["tools"] = tools
     problem = ""
-    for _ in range(RATE_LIMIT_ATTEMPTS):
+    for attempt in range(ATTEMPTS):
         try:
             response = httpx.post(
                 f"{provider.base_url}/chat/completions",
@@ -84,10 +85,12 @@ def _call(
             problem = f"{provider.name}: {type(exc).__name__}"
             time.sleep(5)
             continue
-        if response.status_code == 429:
-            wait = _retry_after(response)
-            problem = f"{provider.name}: rate limited"
-            print(f"  {provider.name} rate limit reached, waiting {wait:.0f}s")
+        if response.status_code in RETRY_STATUSES:
+            wait = _wait_seconds(response, attempt)
+            problem = f"{provider.name}: HTTP {response.status_code}"
+            print(
+                f"  {provider.name} returned HTTP {response.status_code}, waiting {wait:.0f}s"
+            )
             time.sleep(wait)
             continue
         if response.status_code != 200:
@@ -97,7 +100,7 @@ def _call(
         data = response.json()
         tokens = (data.get("usage") or {}).get("total_tokens", 0)
         return data["choices"][0]["message"], tokens
-    raise LLMError(f"{problem} (gave up after {RATE_LIMIT_ATTEMPTS} attempts)")
+    raise LLMError(f"{problem} (gave up after {ATTEMPTS} attempts)")
 
 
 def chat(

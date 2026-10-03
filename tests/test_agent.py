@@ -52,9 +52,14 @@ def test_agent_runs_tools_then_answers(monkeypatch, one_provider):
     assert result.restarts == 0
 
 
-def test_step_limit_forces_a_final_answer(monkeypatch, one_provider):
+def test_step_limit_forces_a_final_answer_without_tool_context(
+    monkeypatch, one_provider
+):
+    final_messages = []
+
     def fake_chat(messages, tools=None, provider=None):
-        if tools is None:  # the final call without tools
+        if tools is None:  # the final call
+            final_messages.extend(messages)
             return answer("I could not find it."), provider.name, 10
         return tool_call("c", "search_tables", '{"query": "x"}'), provider.name, 10
 
@@ -63,6 +68,9 @@ def test_step_limit_forces_a_final_answer(monkeypatch, one_provider):
     assert result.hit_step_limit
     assert len(result.steps) == 3
     assert result.answer == "I could not find it."
+    # The final call sees the tool results as plain text, never as tool calls
+    assert all(m["role"] in {"system", "user"} for m in final_messages)
+    assert "search_tables" in final_messages[-1]["content"]
 
 
 def test_question_restarts_with_next_provider_instead_of_switching_midway(monkeypatch):
