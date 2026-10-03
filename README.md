@@ -5,6 +5,8 @@ An AI agent that answers questions about Denmark with official numbers from [Sta
 **Try it:** [huggingface.co/spaces/khajlk/ask-statistics-denmark](https://huggingface.co/spaces/khajlk/ask-statistics-denmark)
 **Experiments:** [MLflow on DagsHub](https://dagshub.com/kjibran/statbank-rag-agent/experiments)
 
+![The demo answering a question, with the steps the agent took to find the answer](docs/demo.png)
+
 ```
 Question: How many people lived in Aarhus municipality on 1 January 2020?
 
