@@ -65,3 +65,25 @@ def test_oversized_request_is_refused():
 def test_bad_tool_calls_return_errors_not_crashes():
     assert "error" in run_tool("no_such_tool", "{}")
     assert "error" in run_tool("describe_table", "not json")
+
+
+def test_warning_when_leaving_out_a_variable_may_not_cover_everything():
+    from statbank_rag_agent.tools import describe_variable
+
+    islands = {
+        "id": "ØER",
+        "text": "islands",
+        "elimination": True,
+        "values": [{"id": "1", "text": "Funen"}, {"id": "2", "text": "Bornholm"}],
+    }
+    regions = {
+        "id": "OMRÅDE",
+        "text": "region",
+        "elimination": True,
+        "values": [
+            {"id": "000", "text": "All Denmark"},
+            {"id": "101", "text": "Copenhagen"},
+        ],
+    }
+    assert "WARNING" in describe_variable(islands)
+    assert "WARNING" not in describe_variable(regions)

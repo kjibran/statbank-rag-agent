@@ -69,6 +69,29 @@ def _compact(entry: dict) -> str:
     return f"{entry['code']}={entry['label']}{suffix}"
 
 
+def describe_variable(variable: dict) -> str:
+    """One line per variable, with a warning when leaving it out may not cover everything."""
+    values = variable.get("values", [])
+    head = f"{variable['id']} ({variable['text']})"
+    if variable.get("time"):
+        latest = ", ".join(v["id"] for v in values[-EXAMPLE_VALUES:])
+        first = values[0]["id"] if values else "?"
+        last = values[-1]["id"] if values else "?"
+        return (
+            f"{head}: must be selected. Time codes {first} to {last}. Latest: {latest}"
+        )
+
+    can_leave_out = variable.get("elimination", False)
+    rule = "can be left out (summed)" if can_leave_out else "must be selected"
+    warning = ""
+    if can_leave_out and not any(is_total(v["id"], v["text"]) for v in values):
+        # Without a total value, leaving the variable out sums only the listed values,
+        # which may cover only part of the country or population.
+        warning = " WARNING: no total value, so leaving it out sums only the listed values, which may not cover everything."
+    examples = ", ".join(_compact(_value_entry(v)) for v in values[:EXAMPLE_VALUES])
+    return f"{head}: {len(values)} values, {rule}.{warning} Examples: {examples}"
+
+
 def check_selections(info: dict, selections: dict[str, list[str]]) -> str | None:
     """Return a problem description, or None if the selection can be fetched."""
     by_id = {v["id"].lower(): v for v in info["variables"]}
@@ -145,31 +168,9 @@ def describe_table(table_id: str) -> dict:
     info = _tableinfo(table_id)
     if info is None:
         return _unknown_table(table_id)
-    variables = []
-    for variable in info["variables"]:
-        values = variable.get("values", [])
-        head = f"{variable['id']} ({variable['text']})"
-        if variable.get("time"):
-            latest = ", ".join(v["id"] for v in values[-EXAMPLE_VALUES:])
-            first = values[0]["id"] if values else "?"
-            variables.append(
-                f"{head}: must be selected. Time codes {first} to {values[-1]['id']}. Latest: {latest}"
-            )
-        else:
-            rule = (
-                "can be left out (summed)"
-                if variable.get("elimination", False)
-                else "must be selected"
-            )
-            examples = ", ".join(
-                _compact(_value_entry(v)) for v in values[:EXAMPLE_VALUES]
-            )
-            variables.append(
-                f"{head}: {len(values)} values, {rule}. Examples: {examples}"
-            )
     return {
         "table": f"{info.get('id', table_id.upper())} | {info.get('text')} | unit: {info.get('unit')}",
-        "variables": variables,
+        "variables": [describe_variable(v) for v in info["variables"]],
         "rules": "Never add a total value to its own parts. Use find_values for codes not shown.",
     }
 

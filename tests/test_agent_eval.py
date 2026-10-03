@@ -35,3 +35,11 @@ def test_real_refusals_from_the_agent_are_recognised():
     assert is_refusal(
         "Statistics Denmark doesn\u2019t have data on unemployment in 1850."
     )
+
+
+def test_adjacent_numbers_are_also_read_separately():
+    numbers = numbers_in(
+        "547 100\u2011year\u2011olds lived in Denmark on 1 January 2025."
+    )
+    assert 547.0 in numbers
+    assert 349983.0 in numbers_in("349 983 people")  # the thousands reading still works

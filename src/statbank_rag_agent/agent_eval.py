@@ -101,23 +101,29 @@ def true_value(truth: dict) -> float:
 # --- Checking answers ---
 
 
-def numbers_in(text: str) -> list[float]:
-    """Numbers in an answer, read with either comma, point or any kind of space as thousands separator.
+def _parse(raw: str) -> list[float]:
+    """Read one number written with comma, point or no thousands separator."""
+    values = []
+    for candidate in {raw.replace(",", ""), raw.replace(".", "").replace(",", ".")}:
+        try:
+            values.append(float(candidate))
+        except ValueError:
+            continue
+    return values
 
-    Models often write thousands separators as non-breaking or narrow spaces (such as U+202F),
-    so every whitespace character is removed, not only the ordinary space.
+
+def numbers_in(text: str) -> list[float]:
+    """Every plausible reading of the numbers in an answer.
+
+    A space can be a thousands separator ("349 983") or just separate two numbers
+    ("547 100-year-olds"). Both readings are kept, so the check does not depend on guessing.
+    Any kind of space counts, since models often use non-breaking or narrow spaces.
     """
     found = []
     for raw in NUMBER_PATTERN.findall(text):
-        compact = re.sub(r"\s", "", raw)
-        for candidate in {
-            compact.replace(",", ""),
-            compact.replace(".", "").replace(",", "."),
-        }:
-            try:
-                found.append(float(candidate))
-            except ValueError:
-                continue
+        found.extend(_parse(re.sub(r"\s", "", raw)))  # spaces as thousands separators
+        for part in re.split(r"\s+", raw.strip()):  # spaces between separate numbers
+            found.extend(_parse(part))
     return found
 
 
