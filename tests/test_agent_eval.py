@@ -17,3 +17,21 @@ def test_citation_and_refusal_detection():
     assert not is_cited("No source given.")
     assert is_refusal("I could not find a table about cats.")
     assert not is_refusal("378 361 people live in Aarhus.")
+
+
+def test_numbers_with_non_breaking_and_narrow_spaces():
+    for space in [
+        "\u00a0",
+        "\u202f",
+        "\u2009",
+    ]:  # no-break, narrow no-break, thin space
+        assert 349983.0 in numbers_in(f"349{space}983 people"), repr(space)
+
+
+def test_real_refusals_from_the_agent_are_recognised():
+    assert is_refusal(
+        "I\u2019m sorry, but Statistics Denmark does not provide a table with the number of cats in Copenhagen."
+    )
+    assert is_refusal(
+        "Statistics Denmark doesn\u2019t have data on unemployment in 1850."
+    )

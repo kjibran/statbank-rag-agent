@@ -24,6 +24,16 @@ REFUSAL_PHRASES = (
     "unable to",
     "no statistics",
     "not possible",
+    "does not provide",
+    "doesn't provide",
+    "does not have",
+    "doesn't have",
+    "does not publish",
+    "doesn't publish",
+    "no information",
+    "not include",
+    "there is no",
+    "there are no",
 )
 
 
@@ -92,10 +102,14 @@ def true_value(truth: dict) -> float:
 
 
 def numbers_in(text: str) -> list[float]:
-    """Numbers in an answer, read with either comma, point or space as thousands separator."""
+    """Numbers in an answer, read with either comma, point or any kind of space as thousands separator.
+
+    Models often write thousands separators as non-breaking or narrow spaces (such as U+202F),
+    so every whitespace character is removed, not only the ordinary space.
+    """
     found = []
     for raw in NUMBER_PATTERN.findall(text):
-        compact = raw.replace(" ", "").replace("\u00a0", "")
+        compact = re.sub(r"\s", "", raw)
         for candidate in {
             compact.replace(",", ""),
             compact.replace(".", "").replace(",", "."),
@@ -118,5 +132,6 @@ def is_cited(answer: str) -> bool:
 
 
 def is_refusal(answer: str) -> bool:
-    low = answer.lower()
+    # Models often use typographic apostrophes, so they are normalised before matching
+    low = answer.lower().replace("\u2019", "'")
     return any(phrase in low for phrase in REFUSAL_PHRASES)

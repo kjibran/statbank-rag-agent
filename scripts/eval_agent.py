@@ -22,7 +22,7 @@ from statbank_rag_agent.config import settings
 QUESTIONS_FILE = "eval/agent.jsonl"
 TRUTH_FILE = "eval/agent_truth.json"
 EXPERIMENT = "agent-evaluation"
-PAUSE_SECONDS = 45  # lets Groq's per-minute token budget refill between questions
+PAUSE_SECONDS = 60  # lets Groq's per-minute token budget refill fully between questions
 
 # Usage: eval_agent.py              all questions
 #        eval_agent.py a01,u01      only the listed questions (no MLflow logging)
@@ -67,6 +67,7 @@ for i, q in enumerate(questions):
         answer=result.answer,
         steps=len(result.steps),
         model_calls=len(result.providers),
+        tokens=result.tokens,
         seconds=round(result.seconds, 1),
         restarts=result.restarts,
         hit_step_limit=result.hit_step_limit,
@@ -99,7 +100,8 @@ for i, q in enumerate(questions):
     )
     cited = "cited" if record["cited"] else "no source"
     print(
-        f"{q['id']}  {verdict:8} {cited:9} {record['steps']} steps  {record['seconds']:5.1f}s  {result.tables_used}"
+        f"{q['id']}  {verdict:8} {cited:9} {record['steps']} steps  "
+        f"{record['tokens']:>6,} tokens  {record['seconds']:5.1f}s  {result.tables_used}"
     )
 
 answerable_records = [r for r in records if r["answerable"]]
@@ -111,27 +113,26 @@ def share(items: list, key: str) -> float:
     return sum(1 for r in items if r.get(key)) / len(items) if items else 0.0
 
 
+def average(key: str) -> float:
+    return sum(r[key] for r in completed) / len(completed) if completed else 0.0
+
+
 metrics = {
     "accuracy": share(answerable_records, "correct"),
     "citation_rate": share(answerable_records, "cited"),
     "refusal_rate": share(unanswerable_records, "refused"),
     "error_rate": 1 - len(completed) / len(records) if records else 0.0,
-    "avg_steps": sum(r["steps"] for r in completed) / len(completed)
-    if completed
-    else 0.0,
-    "avg_model_calls": sum(r["model_calls"] for r in completed) / len(completed)
-    if completed
-    else 0.0,
-    "avg_seconds": sum(r["seconds"] for r in completed) / len(completed)
-    if completed
-    else 0.0,
+    "avg_steps": average("steps"),
+    "avg_model_calls": average("model_calls"),
+    "avg_tokens": average("tokens"),
+    "avg_seconds": average("seconds"),
 }
 
 print(
     f"\n{len(answerable_records)} answerable, {len(unanswerable_records)} unanswerable questions"
 )
 for name, value in metrics.items():
-    print(f"  {name:16} {value:.2f}")
+    print(f"  {name:16} {value:,.2f}")
 
 if only:
     print("\nPartial run, not logged to MLflow.")
