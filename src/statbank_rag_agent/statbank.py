@@ -1,3 +1,5 @@
+import csv
+import io
 import time
 
 import httpx
@@ -35,3 +37,28 @@ def fetch_tableinfo(table_id: str) -> dict:
     return _get(
         f"tableinfo/{table_id}", {"lang": settings.language, "format": "JSON"}
     ).json()
+
+
+def fetch_data(table_id: str, selections: dict[str, list[str]]) -> list[dict]:
+    """Numbers for the selected codes. Variables not selected are summed over by Statistics Denmark."""
+    body = {
+        "table": table_id,
+        "format": "CSV",
+        "lang": settings.language,
+        "variables": [
+            {"code": code, "values": values} for code, values in selections.items()
+        ],
+    }
+    response = httpx.post(f"{settings.statbank_url}/data", json=body, timeout=60)
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Statbank returned HTTP {response.status_code}: {response.text[:300]}"
+        )
+
+    # The CSV starts with a byte-order mark and uses semicolons. 'utf-8-sig' removes the mark.
+    text = response.content.decode("utf-8-sig")
+    rows = []
+    for row in csv.DictReader(io.StringIO(text), delimiter=";"):
+        value = row.pop("INDHOLD", None)  # Danish for "content": the number itself
+        rows.append({**row, "value": value})
+    return rows
