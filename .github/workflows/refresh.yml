@@ -1,0 +1,35 @@
+name: Weekly catalogue refresh
+
+on:
+  schedule:
+    - cron: "23 2 * * 0"  # Sundays 02:23 UTC. An odd minute, since GitHub delays jobs at the top of the hour
+  workflow_dispatch:  # also allows a manual run from the Actions tab
+
+concurrency:
+  group: catalogue-refresh
+  cancel-in-progress: false  # never interrupt a refresh halfway
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/fastembed
+          key: fastembed-bge-small-en-v1.5
+      - name: Update the table list
+        run: uv run python scripts/ingest_catalogue.py
+      - name: Fetch metadata for new and updated tables
+        run: uv run python scripts/fetch_tableinfo.py
+      - name: Rebuild search texts
+        run: uv run python scripts/build_search_texts.py
+      - name: Embed changed search texts
+        run: uv run python scripts/embed_catalogue.py
