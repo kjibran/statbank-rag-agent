@@ -77,3 +77,22 @@ def test_rich_text_skips_time_values_and_caps_long_lists():
     assert "2026M09." not in text.split("Unit")[1]  # time values are not listed
     assert "and 5 more" in text
     assert f"Value {MAX_VALUES_PER_VARIABLE}" not in text
+
+
+def test_time_resolution_from_period_format():
+    from statbank_rag_agent.catalogue import time_resolution
+
+    assert "Monthly" in time_resolution("2026M08")
+    assert "Quarterly" in time_resolution("2026Q3")
+    assert "Quarterly" in time_resolution("2026K3")
+    assert "Yearly" in time_resolution("2026")
+    assert time_resolution("2019/2020") is None
+
+
+def test_rich_text_says_monthly_for_monthly_tables():
+    info = {
+        "text": "Population at the first day of the month",
+        "unit": "Number",
+        "variables": [],
+    }
+    assert "Monthly" in build_rich_search_text(info, "2021M10", "2026M08")

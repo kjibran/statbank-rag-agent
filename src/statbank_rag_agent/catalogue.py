@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -7,6 +8,26 @@ from statbank_rag_agent.db import connect
 
 STATBANK_TZ = ZoneInfo("Europe/Copenhagen")
 MAX_VALUES_PER_VARIABLE = 12
+
+# How often a table is published, read from the format of its periods.
+# Each description uses the words people search with ("monthly" as well as "month").
+TIME_RESOLUTIONS = [
+    (re.compile(r"^\d{4}M\d{2}$"), "Monthly figures, month by month."),
+    (re.compile(r"^\d{4}[QK]\d$"), "Quarterly figures, quarter by quarter."),
+    (re.compile(r"^\d{4}H\d$"), "Half-yearly figures."),
+    (re.compile(r"^\d{4}U\d{2}$"), "Weekly figures, week by week."),
+    (re.compile(r"^\d{4}$"), "Yearly figures, annual."),
+]
+
+
+def time_resolution(period: str | None) -> str | None:
+    """'Monthly figures, month by month.' for '2021M10', and so on. None if the format is unknown."""
+    if not period:
+        return None
+    for pattern, description in TIME_RESOLUTIONS:
+        if pattern.match(period):
+            return description
+    return None
 
 
 def build_search_text(table: dict) -> str:
@@ -31,14 +52,14 @@ def build_rich_search_text(
     Value labels carry words people search for (such as "retail" or "dentist")
     and tell apart tables whose titles and variable names are identical.
     """
-    parts = [
-        f"{info['text']}.",
-        f"Covers {first_period} to {latest_period}.",
-        f"Unit: {info.get('unit')}.",
-    ]
+    parts = [f"{info['text']}.", f"Covers {first_period} to {latest_period}."]
+    resolution = time_resolution(latest_period)
+    if resolution:
+        parts.append(resolution)
+    parts.append(f"Unit: {info.get('unit')}.")
     for variable in info.get("variables", []):
         if variable.get("time"):
-            continue  # time is already covered by the period
+            continue  # time is already covered by the period and resolution
         labels = [value["text"] for value in variable.get("values", [])]
         sample = ", ".join(labels[:MAX_VALUES_PER_VARIABLE])
         more = len(labels) - MAX_VALUES_PER_VARIABLE
