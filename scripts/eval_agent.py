@@ -2,9 +2,10 @@ import hashlib
 import json
 import subprocess
 import sys
-import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import mlflow
 
@@ -21,11 +22,13 @@ from statbank_rag_agent.config import settings
 
 QUESTIONS_FILE = "eval/agent.jsonl"
 TRUTH_FILE = "eval/agent_truth.json"
+RESULTS_DIR = Path("eval/results")
 EXPERIMENT = "agent-evaluation"
 PAUSE_SECONDS = 60  # lets Groq's per-minute token budget refill fully between questions
+LOCAL_TZ = ZoneInfo("Europe/Copenhagen")
 
-# Usage: eval_agent.py              all questions
-#        eval_agent.py a01,u01      only the listed questions (no MLflow logging)
+# Usage: eval_agent.py              all questions, logged to MLflow
+#        eval_agent.py a01,u01      only the listed questions (saved locally, not logged)
 only = set(sys.argv[1].split(",")) if len(sys.argv) > 1 else None
 
 
@@ -43,6 +46,16 @@ def fingerprint(*paths: str) -> str:
         digest.update(Path(path).read_bytes())
     return digest.hexdigest()[:12]
 
+
+# Fail fast: check the MLflow connection before spending 20 minutes on questions
+if only is None:
+    try:
+        mlflow.set_experiment(EXPERIMENT)
+    except Exception as exc:  # noqa: BLE001 - any connection problem should stop the run now
+        sys.exit(
+            f"MLflow is not reachable, so the run was not started: {exc}\n"
+            "Did you run with: uv run --env-file .env python scripts/eval_agent.py ?"
+        )
 
 questions = [
     q for q in load_questions(QUESTIONS_FILE) if only is None or q["id"] in only
@@ -93,6 +106,7 @@ for i, q in enumerate(questions):
         record["refused"] = is_refusal(result.answer)
     records.append(record)
 
+    passed = record["correct"] if answerable else record["refused"]
     verdict = (
         ("CORRECT" if record["correct"] else "WRONG")
         if answerable
@@ -103,6 +117,18 @@ for i, q in enumerate(questions):
         f"{q['id']}  {verdict:8} {cited:9} {record['steps']} steps  "
         f"{record['tokens']:>6,} tokens  {record['seconds']:5.1f}s  {result.tables_used}"
     )
+    if not passed:
+        expected = (
+            f"expected {record['truth']:,.0f}"
+            if answerable and record.get("truth")
+            else "expected a refusal"
+        )
+        print(f"     {expected}. Answer: {result.answer[:300]}")
+
+# Always save locally first, so a failure at the end never loses the results
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+results_file = RESULTS_DIR / f"agent_{datetime.now(LOCAL_TZ):%Y%m%d_%H%M}.json"
+results_file.write_text(json.dumps(records, indent=1, ensure_ascii=False))
 
 answerable_records = [r for r in records if r["answerable"]]
 unanswerable_records = [r for r in records if not r["answerable"]]
@@ -133,12 +159,12 @@ print(
 )
 for name, value in metrics.items():
     print(f"  {name:16} {value:,.2f}")
+print(f"\nFull results with traces saved to {results_file}")
 
 if only:
-    print("\nPartial run, not logged to MLflow.")
+    print("Partial run, not logged to MLflow.")
     sys.exit()
 
-mlflow.set_experiment(EXPERIMENT)
 with mlflow.start_run(run_name="agent"):
     mlflow.set_tags(
         {
@@ -156,8 +182,5 @@ with mlflow.start_run(run_name="agent"):
         }
     )
     mlflow.log_metrics(metrics)
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "agent_results.json"
-        out.write_text(json.dumps(records, indent=1, ensure_ascii=False))
-        mlflow.log_artifact(str(out))
-print("\nLogged to MLflow experiment 'agent-evaluation'")
+    mlflow.log_artifact(str(results_file))
+print("Logged to MLflow experiment 'agent-evaluation'")
