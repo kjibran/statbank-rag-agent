@@ -1,12 +1,17 @@
+import time
 from dataclasses import dataclass
 
 import httpx
 
 from statbank_rag_agent.config import settings
 
+RATE_LIMIT_ATTEMPTS = 3
+DEFAULT_RETRY_SECONDS = 20.0
+MAX_RETRY_SECONDS = 60.0
+
 
 class LLMError(Exception):
-    """Every provider failed for this request."""
+    """The provider (or every provider) failed for this request."""
 
 
 @dataclass
@@ -36,20 +41,24 @@ def providers() -> list[Provider]:
     return [p for p in candidates if p.api_key and p.model]
 
 
-def chat(messages: list[dict], tools: list[dict] | None = None) -> tuple[dict, str]:
-    """Send a chat request, trying providers in order.
+def _retry_after(response: httpx.Response) -> float:
+    """How long the provider asks us to wait, capped at a minute."""
+    header = response.headers.get("retry-after")
+    try:
+        return (
+            min(float(header), MAX_RETRY_SECONDS) if header else DEFAULT_RETRY_SECONDS
+        )
+    except ValueError:
+        return DEFAULT_RETRY_SECONDS
 
-    Returns the model's message (text, or a request to call tools) and the provider that answered.
-    """
-    errors = []
-    for provider in providers():
-        payload: dict = {
-            "model": provider.model,
-            "messages": messages,
-            "temperature": 0,
-        }
-        if tools:
-            payload["tools"] = tools
+
+def _call(provider: Provider, messages: list[dict], tools: list[dict] | None) -> dict:
+    """One request to one provider. Rate limits and network errors are retried after a pause."""
+    payload: dict = {"model": provider.model, "messages": messages, "temperature": 0}
+    if tools:
+        payload["tools"] = tools
+    problem = ""
+    for _ in range(RATE_LIMIT_ATTEMPTS):
         try:
             response = httpx.post(
                 f"{provider.base_url}/chat/completions",
@@ -58,28 +67,53 @@ def chat(messages: list[dict], tools: list[dict] | None = None) -> tuple[dict, s
                 timeout=60,
             )
         except httpx.HTTPError as exc:
-            errors.append(f"{provider.name}: {type(exc).__name__}")
+            problem = f"{provider.name}: {type(exc).__name__}"
+            time.sleep(5)
+            continue
+        if response.status_code == 429:
+            wait = _retry_after(response)
+            problem = f"{provider.name}: rate limited"
+            print(f"  {provider.name} rate limit reached, waiting {wait:.0f}s")
+            time.sleep(wait)
             continue
         if response.status_code != 200:
-            errors.append(
+            raise LLMError(
                 f"{provider.name}: HTTP {response.status_code}: {response.text[:200]}"
             )
-            continue
-        return response.json()["choices"][0]["message"], provider.name
-    raise LLMError(
-        "All providers failed. " + " | ".join(errors)
-        if errors
-        else "No provider configured."
-    )
+        return response.json()["choices"][0]["message"]
+    raise LLMError(f"{problem} (gave up after {RATE_LIMIT_ATTEMPTS} attempts)")
+
+
+def chat(
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    provider: Provider | None = None,
+) -> tuple[dict, str]:
+    """Send a chat request. With `provider`, only that provider is used. Otherwise fall back in order.
+
+    Returns the model's message (text, or a request to call tools) and the provider that answered.
+    """
+    candidates = [provider] if provider else providers()
+    if not candidates:
+        raise LLMError("No provider configured.")
+    errors = []
+    for candidate in candidates:
+        try:
+            return _call(candidate, messages, tools), candidate.name
+        except LLMError as exc:
+            errors.append(str(exc))
+    raise LLMError("All providers failed. " + " | ".join(errors))
 
 
 def clean_assistant_message(message: dict) -> dict:
-    """Keep only the standard fields when a model reply goes back into the conversation.
+    """Keep what a provider needs to continue the same conversation.
 
-    Providers add their own extras (Groq returns a 'reasoning' field, for example), and
-    sending those back can make another provider reject the request after a fallback.
+    Tool calls are kept exactly as returned: Gemini attaches a signature to each call and
+    rejects later requests without it. Other extras, such as Groq's 'reasoning' text, are dropped.
     """
     cleaned = {"role": "assistant", "content": message.get("content")}
     if message.get("tool_calls"):
         cleaned["tool_calls"] = message["tool_calls"]
+    if message.get("extra_content"):
+        cleaned["extra_content"] = message["extra_content"]
     return cleaned
