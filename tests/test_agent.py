@@ -56,21 +56,29 @@ def test_step_limit_forces_a_final_answer_without_tool_context(
     monkeypatch, one_provider
 ):
     final_messages = []
+    queries = iter(
+        ["x", "y", "z"]
+    )  # different queries, so the repetition guard does not block them
 
     def fake_chat(messages, tools=None, provider=None):
         if tools is None:  # the final call
             final_messages.extend(messages)
             return answer("I could not find it."), provider.name, 10
-        return tool_call("c", "search_tables", '{"query": "x"}'), provider.name, 10
+        return (
+            tool_call("c", "search_tables", f'{{"query": "{next(queries)}"}}'),
+            provider.name,
+            10,
+        )
 
     monkeypatch.setattr(agent.llm, "chat", fake_chat)
     result = agent.run_agent("Impossible question", max_steps=3)
     assert result.hit_step_limit
     assert len(result.steps) == 3
     assert result.answer == "I could not find it."
-    # The final call sees the tool results as plain text, never as tool calls
+    # The final call sees the steps as prose, never as tool calls or function-call syntax
     assert all(m["role"] in {"system", "user"} for m in final_messages)
-    assert "search_tables" in final_messages[-1]["content"]
+    assert "searched the tables for" in final_messages[-1]["content"]
+    assert "search_tables" not in final_messages[-1]["content"]
 
 
 def test_question_restarts_with_next_provider_instead_of_switching_midway(monkeypatch):
@@ -134,3 +142,23 @@ def test_identical_tool_calls_are_blocked_not_repeated(monkeypatch, one_provider
     assert len(executed) == 1  # the tool ran once
     assert result.repeated_calls == 1
     assert "already made this exact call" in result.steps[1].result["error"]
+
+
+def test_failed_final_answer_falls_back_instead_of_crashing(monkeypatch, one_provider):
+    def fake_chat(messages, tools=None, provider=None):
+        if (
+            tools is None
+        ):  # the final call fails, as with a model that calls a tool anyway
+            raise llm.LLMError(
+                "a: HTTP 400: Tool choice is none, but model called a tool"
+            )
+        return tool_call("c", "search_tables", '{"query": "x"}'), provider.name, 10
+
+    monkeypatch.setattr(agent.llm, "chat", fake_chat)
+    result = agent.run_agent("q", max_steps=2)
+    assert result.hit_step_limit
+    assert result.used_fallback
+    assert result.answer == agent.FALLBACK_ANSWER
+    assert (
+        result.restarts == 0
+    )  # no restart with another provider: the question ends honestly

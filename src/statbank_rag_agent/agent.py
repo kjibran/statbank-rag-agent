@@ -37,15 +37,25 @@ Rules:
 FINAL_ANSWER_PROMPT = """You reached the step limit while answering this question:
 {question}
 
-These are the tool calls you made and what they returned:
+This is what you found so far:
 {transcript}
 
-Answer now using only these results. If they do not contain the answer, say that you could not find it.
-End with the source line, as described in your instructions."""
+Write your final answer now, as plain text. No more tools can be used.
+Use only the numbers above. If they do not answer the question, say that you could not find it.
+If you give a number, end with its source line, for example "Source: Statistics Denmark, StatBank.dk/folk1a"."""
+
+FALLBACK_ANSWER = "I could not find a suitable table within the step limit."
 
 REPEATED_CALL = {
     "error": "You already made this exact call. Do not repeat it. Try a different table from the "
     "search results, or search with different words."
+}
+
+STEP_DESCRIPTIONS = {
+    "search_tables": "searched the tables for",
+    "describe_table": "inspected the table",
+    "find_values": "looked up values with",
+    "get_data": "fetched data with",
 }
 
 
@@ -64,6 +74,7 @@ class AgentResult:
     steps: list[Step] = field(default_factory=list)
     providers: list[str] = field(default_factory=list)
     hit_step_limit: bool = False
+    used_fallback: bool = False  # the final answer was written without the model
     restarts: int = 0  # how often the question was restarted with another provider
     repeated_calls: int = (
         0  # identical tool calls that were blocked instead of run again
@@ -105,20 +116,24 @@ def _system_message() -> dict:
 
 
 def _transcript(steps: list[Step]) -> str:
-    """The tool calls as plain text, for a final answer without any tool context."""
+    """The steps as prose. Text that looks like function calls tempts the model to call a tool."""
     lines = []
     for i, step in enumerate(steps, start=1):
-        arguments = json.dumps(step.arguments, ensure_ascii=False)
+        action = STEP_DESCRIPTIONS.get(step.tool, "used")
+        details = ", ".join(
+            f"{k} {json.dumps(v, ensure_ascii=False)}"
+            for k, v in step.arguments.items()
+        )
         result = json.dumps(step.result, ensure_ascii=False)[:MAX_TOOL_RESULT_CHARS]
-        lines.append(f"{i}. {step.tool}({arguments}) returned: {result}")
+        lines.append(f"Step {i}: {action} {details}. Result: {result}")
     return "\n".join(lines)
 
 
 def _final_answer(provider: llm.Provider, question: str, result: AgentResult) -> None:
-    """Force a text answer at the step limit.
+    """Force a text answer at the step limit, without any tool context.
 
-    The conversation is rebuilt as plain text without tool calls. Some models keep trying
-    to call tools when they see earlier tool calls, even when no tools are offered.
+    If the model still fails (for example by trying to call a tool anyway), the agent
+    answers honestly by itself: at the step limit it has not found the answer.
     """
     messages = [
         _system_message(),
@@ -129,10 +144,15 @@ def _final_answer(provider: llm.Provider, question: str, result: AgentResult) ->
             ),
         },
     ]
-    message, name, tokens = llm.chat(messages, provider=provider)
+    try:
+        message, name, tokens = llm.chat(messages, provider=provider)
+    except llm.LLMError:
+        result.used_fallback = True
+        result.answer = FALLBACK_ANSWER
+        return
     result.providers.append(name)
     result.tokens += tokens
-    result.answer = (message.get("content") or "").strip()
+    result.answer = (message.get("content") or "").strip() or FALLBACK_ANSWER
 
 
 def _run_with(provider: llm.Provider, question: str, max_steps: int) -> AgentResult:
