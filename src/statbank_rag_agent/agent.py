@@ -18,7 +18,7 @@ Today's date is {today}.
 
 Work step by step with the tools:
 1. search_tables with a short topic, for example "population" or "unemployment rate". Leave out place names and specific values.
-2. describe_table for the most promising table. Check that its variables and period fit the question. If they do not, describe another candidate or search again with other words.
+2. describe_table for the most promising table. Check that its variables and period fit the question. If they do not, describe another candidate or search again with other words. If a table does not fit after one or two attempts, go back to the search results and try the next candidate.
 3. find_values to look up codes for places, categories or ages. Municipalities and regions are usually in a variable called region (OMRÅDE).
 4. get_data with as few codes as possible.
 
@@ -43,6 +43,11 @@ These are the tool calls you made and what they returned:
 Answer now using only these results. If they do not contain the answer, say that you could not find it.
 End with the source line, as described in your instructions."""
 
+REPEATED_CALL = {
+    "error": "You already made this exact call. Do not repeat it. Try a different table from the "
+    "search results, or search with different words."
+}
+
 
 @dataclass
 class Step:
@@ -60,6 +65,9 @@ class AgentResult:
     providers: list[str] = field(default_factory=list)
     hit_step_limit: bool = False
     restarts: int = 0  # how often the question was restarted with another provider
+    repeated_calls: int = (
+        0  # identical tool calls that were blocked instead of run again
+    )
     tokens: int = 0  # total tokens used across all model calls
     seconds: float = 0.0
 
@@ -81,6 +89,11 @@ def _parse_arguments(raw: str) -> dict:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _call_key(tool: str, arguments: dict) -> str:
+    """Identical calls get identical keys, whatever the order of their arguments."""
+    return f"{tool}:{json.dumps(arguments, sort_keys=True, ensure_ascii=False)}"
 
 
 def _today() -> str:
@@ -126,6 +139,7 @@ def _run_with(provider: llm.Provider, question: str, max_steps: int) -> AgentRes
     """The whole conversation with one provider. Tool-calling conversations cannot switch midway."""
     result = AgentResult(question=question)
     messages = [_system_message(), {"role": "user", "content": question}]
+    seen_calls: set[str] = set()
 
     for _ in range(max_steps):
         message, name, tokens = llm.chat(messages, TOOL_SCHEMAS, provider=provider)
@@ -140,11 +154,16 @@ def _run_with(provider: llm.Provider, question: str, max_steps: int) -> AgentRes
 
         for call in tool_calls:
             tool = call["function"]["name"]
-            raw_arguments = call["function"].get("arguments") or "{}"
-            output = run_tool(tool, raw_arguments)
-            result.steps.append(
-                Step(tool, _parse_arguments(raw_arguments), output, name)
-            )
+            arguments = _parse_arguments(call["function"].get("arguments") or "{}")
+            key = _call_key(tool, arguments)
+            if key in seen_calls:
+                # A repeated call would return the same result again: block it and say why
+                output = REPEATED_CALL
+                result.repeated_calls += 1
+            else:
+                output = run_tool(tool, json.dumps(arguments, ensure_ascii=False))
+                seen_calls.add(key)
+            result.steps.append(Step(tool, arguments, output, name))
             messages.append(
                 {
                     "role": "tool",

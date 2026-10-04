@@ -103,3 +103,34 @@ def test_tables_used_only_counts_successful_data_fetches():
         agent.Step("describe_table", {"table_id": "BEFOLK2"}, {}, "fake"),
     ]
     assert result.tables_used == ["FOLK1A"]
+
+
+def test_identical_tool_calls_are_blocked_not_repeated(monkeypatch, one_provider):
+    executed = []
+    monkeypatch.setattr(
+        agent,
+        "run_tool",
+        lambda name, arguments: executed.append(arguments) or {"matches": []},
+    )
+    same_call = tool_call(
+        "c",
+        "find_values",
+        '{"table_id": "BEF4", "variable_id": "OER", "text": "Denmark"}',
+    )
+    # Same arguments in a different order: still the same call
+    reordered = tool_call(
+        "d",
+        "find_values",
+        '{"text": "Denmark", "table_id": "BEF4", "variable_id": "OER"}',
+    )
+    replies = iter([same_call, reordered, answer("I could not find it.")])
+    monkeypatch.setattr(
+        agent.llm,
+        "chat",
+        lambda messages, tools=None, provider=None: (next(replies), provider.name, 10),
+    )
+
+    result = agent.run_agent("q")
+    assert len(executed) == 1  # the tool ran once
+    assert result.repeated_calls == 1
+    assert "already made this exact call" in result.steps[1].result["error"]

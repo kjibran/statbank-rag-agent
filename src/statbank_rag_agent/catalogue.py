@@ -8,11 +8,13 @@ from statbank_rag_agent.db import connect
 
 STATBANK_TZ = ZoneInfo("Europe/Copenhagen")
 MAX_VALUES_PER_VARIABLE = 12
+MONTHS = "January, February, March, April, May, June, July, August, September, October, November, December"
 
 # How often a table is published, read from the format of its periods.
 # Each description uses the words people search with ("monthly" as well as "month").
+# Monthly tables also list the month names, so a question about "1 March" can find them.
 TIME_RESOLUTIONS = [
-    (re.compile(r"^\d{4}M\d{2}$"), "Monthly figures, month by month."),
+    (re.compile(r"^\d{4}M\d{2}$"), f"Monthly figures, month by month: {MONTHS}."),
     (re.compile(r"^\d{4}[QK]\d$"), "Quarterly figures, quarter by quarter."),
     (re.compile(r"^\d{4}H\d$"), "Half-yearly figures."),
     (re.compile(r"^\d{4}U\d{2}$"), "Weekly figures, week by week."),
@@ -21,7 +23,7 @@ TIME_RESOLUTIONS = [
 
 
 def time_resolution(period: str | None) -> str | None:
-    """'Monthly figures, month by month.' for '2021M10', and so on. None if the format is unknown."""
+    """'Monthly figures, month by month: ...' for '2021M10', and so on. None if the format is unknown."""
     if not period:
         return None
     for pattern, description in TIME_RESOLUTIONS:
