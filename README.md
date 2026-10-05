@@ -47,7 +47,7 @@ The catalogue is built from the Statbank API: the list of tables, then the full 
 - **Data comes as semicolon-separated CSV with a byte-order mark**, and the number column is called INDHOLD.
 - **Variables left out of a request are summed.** That is useful, but only safe when the values cover everything. A table broken down by islands sums only the listed islands, not all of Denmark.
 
-Each table gets a search text with its title, time range, unit, publishing frequency (monthly, quarterly, yearly) and up to 12 value labels per variable. The value labels carry the words people search with ("retail", "Poland", "divorce") and separate tables with identical titles: identical search texts dropped from 39 to a single pair. The frequency is read from the period format (2021M10 means monthly), because "population monthly" could not find the monthly population table until the word "monthly" was in its text.
+Each table gets a search text with its title, time range, unit, publishing frequency and up to 12 value labels per variable. The value labels carry the words people search with ("retail", "Poland", "divorce") and separate tables with identical titles: identical search texts dropped from 39 to a single pair. The frequency is read from the period format (2021M10 means monthly), and monthly tables also list the month names, so a question about "1 March" can find them.
 
 Embeddings use `BAAI/bge-small-en-v1.5` through fastembed (384 dimensions, CPU only) and are stored in Postgres with pgvector and an HNSW index.
 
@@ -96,8 +96,9 @@ Design choices:
 
 - **The agent writes its own search query.** It searches for "population", not "How many people live in Aarhus?", and finds Aarhus later with `find_values`.
 - **Tools never crash.** Problems come back as messages such as "Variable Tid (time) must be selected", and the agent corrects itself on the next step.
-- **Answers come only from fetched data**, with a source line in the format Statistics Denmark asks for.
-- **At most 8 steps.** At the limit, the model gets its tool results as plain text and must answer or say it could not find the data.
+- **Answers come only from fetched data**, with a source line in the format Statistics Denmark asks for. When the agent finds nothing, it says it could not find a table, never that the data does not exist.
+- **No loops.** An identical repeated tool call is blocked and the agent is told to try another table or other words.
+- **At most 8 steps.** At the limit, the model gets its results as plain prose and must answer or say it could not find the data. If even that fails, the agent answers honestly by itself instead of crashing.
 - **One provider per question.** Groq is tried first, then Gemini. A tool-calling conversation cannot move between providers halfway: Gemini rejected a conversation whose earlier tool calls came from Groq, because it requires its own signature on each tool call. If a provider fails for good, the question restarts from scratch with the next one.
 - **Rate limits and overloads are retried** after the wait the provider asks for.
 - **Compact tool results and low reasoning effort** on Groq cut tokens per question by about a quarter.
@@ -113,9 +114,17 @@ Design choices:
 | Run | Accuracy | Cited | Refused correctly | Errors | Steps | Tokens | Seconds |
 |---|---|---|---|---|---|---|---|
 | 1 | 0.87 (13 of 15) | 0.87 | 1.00 (3 of 3) | 1 of 18 | 3.4 | 5,200 | 8.6 |
-| 2 | to be added | | | | | | |
+| 2 | 0.80 (12 of 15) | 0.80 | 1.00 (3 of 3) | 0 of 18 | 3.9 | 6,200 | 8.1 |
+| 3 | 0.80 (12 of 15) | 0.87 | 1.00 (3 of 3) | 0 of 18 | 4.3 | 6,800 | 9.7 |
 
-Averages are per question. Both runs are logged in MLflow with the full trace of every question.
+Averages are per question. All runs are logged in MLflow with the full trace of every question. Between runs, the fixes described below were added: retries for overloads, a safer final answer, searching twice before refusing and frequency in the search texts before run 2, then the loop guard, month names and the final-answer fallback before run 3.
+
+What the three runs show:
+
+- **Accuracy is stable at 80 to 87%.** The misses move between questions from run to run, which points to run-to-run variation rather than a single bug.
+- **The agent almost never states a wrong number.** Across 45 answerable attempts it gave a wrong number once. Every other miss was an honest "I could not find it", and all 9 unanswerable attempts were declined. For a system that answers with official statistics, declining when unsure matters more than answering everything.
+- **The one wrong number** came from a quarterly table: asked for divorces in 2020, the agent reported a single quarter (1,311) instead of the whole year (15,720).
+- **Carefulness costs tokens.** The loop guard and the rule to search twice make the agent try harder on difficult questions, raising the average from 5,200 to 6,800 tokens.
 
 ### Failures found and fixed
 
@@ -129,22 +138,23 @@ The evaluation found problems in the agent, in the search and in the evaluation 
 Each real answer became a test case. An evaluation is only as good as its checker.
 
 **In the agent.**
-- **Wrong coverage:** asked for the population of Denmark in 1950, the agent used a table broken down by islands and selected a value that was a total of the islands, not of the country. It answered 1.79 million instead of 4.25 million. Fixed by a data-driven warning in `describe_table` and a rule to check that the data covers what was asked.
-- **False refusal:** asked about Copenhagen on 1 March 2025, the agent searched "monthly population" and found nothing, although a monthly table exists. The search could not connect "monthly" with "first day of the month". Fixed in the catalogue by adding the frequency to every search text.
-- **Negative hallucination:** in one run it then claimed that Statistics Denmark does not publish monthly figures, which is false. The agent must now say that it could not find a table, never that the data does not exist.
+- **Wrong coverage:** asked for the population of Denmark in 1950, the agent used a table broken down by islands and selected a value that was a total of the islands, not of the country. It answered 1.79 million instead of 4.25 million. Fixed by a data-driven warning in `describe_table` and a rule to check that the data covers what was asked. The agent still struggles with this question, but now declines instead of giving the wrong total.
+- **False refusal:** asked about Copenhagen on 1 March 2025, the agent could not find the monthly population table, because the search could not connect "monthly" or "March" with "first day of the month". Fixed in the catalogue by adding the frequency and month names to the search texts.
+- **Negative hallucination:** in one run it claimed that Statistics Denmark does not publish monthly figures, which is false. The agent must now say that it could not find a table, never that the data does not exist.
+- **Loops:** on the 1901 question, the agent repeated the same failing lookup four times and used up its steps. Fixed by blocking repeated calls and a rule to move on to the next candidate table.
 
 **With the providers.**
-- Groq rejected the forced final answer because the model tried to call a tool when none was offered. Fixed by giving the final call the tool results as plain text.
+- Groq rejected the forced final answer because the model tried to call a tool when none was offered. Fixed by giving the final call the results as prose, plus an honest fallback answer if it still fails.
 - Gemini returned "503, high demand" and was not retried. Overloads are now retried like rate limits.
 
 ### Cost on free tiers
 
-Groq's free tier allows 200,000 tokens per day in a rolling 24-hour window. One full agent evaluation uses about 95,000, so evaluation runs have to be planned around the daily budget. The evaluation pauses a minute between questions to stay within the per-minute limit, checks the MLflow connection before starting, and saves results locally first, so a failure at the end never loses a run.
+Groq's free tier allows 200,000 tokens per day in a rolling 24-hour window. One full agent evaluation uses about 120,000, so evaluation runs have to be planned around the daily budget. The evaluation pauses a minute between questions to stay within the per-minute limit, checks the MLflow connection before starting, and saves results locally first, so a failure at the end never loses a run.
 
 ## Automation and deployment
 
 - **Weekly catalogue refresh** (GitHub Actions, Sundays): new and changed tables, their metadata, rebuilt search texts and new embeddings. Each step only works on what changed. Tables no longer listed by Statistics Denmark are removed, unless the list looks suspiciously short, to protect against wiping the catalogue during an outage.
-- **CI** on every push: ruff and 36 tests, none of which need a database or API key.
+- **CI** on every push: ruff and 38 tests, none of which need a database or API key.
 - **The demo** runs as a Gradio app on Hugging Face Spaces. It reads the database through a read-only role with a row-level security policy, answers one question at a time and has a daily question limit to protect the free model quotas.
 
 ## Run it yourself
@@ -172,7 +182,7 @@ Ask a question, or run the evaluations:
 ```bash
 uv run python scripts/ask.py "How many people live in Odense?"
 uv run --env-file .env python scripts/eval_retrieval.py   # logs to MLflow
-uv run --env-file .env python scripts/eval_agent.py       # about 20 minutes, about 95,000 tokens
+uv run --env-file .env python scripts/eval_agent.py       # about 20 minutes, about 120,000 tokens
 ```
 
 ## Project structure
@@ -198,7 +208,9 @@ sql/                 database migrations
 ## Limitations
 
 - **Small test sets.** 48 retrieval questions and 18 agent questions. Differences of one or two questions are within noise.
-- **Run-to-run variation.** The agent does not always take the same path on the same question, even at temperature 0. One run is a noisy measurement.
+- **The agent test set was also used for tuning.** The fixes target general failure patterns, but they were found on these same 18 questions. A separate held-out set, never used for tuning, would measure the final agent more fairly.
+- **Run-to-run variation.** The agent does not always take the same path on the same question, even at temperature 0. One run is a noisy measurement, which is why three are reported.
+- **Quarterly and yearly figures.** The agent can mistake one quarter of a quarterly table for a yearly total.
 - **Free models.** Answers can be slow when the free tiers are busy, and the daily token budget limits how often the full evaluation can run.
 - **English only.** Questions in Danish are not evaluated.
 - **One number per question.** Comparisons and calculations across tables are not evaluated.
